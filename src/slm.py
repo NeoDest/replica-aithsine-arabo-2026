@@ -33,45 +33,77 @@ def _valid_hub_id(name):
     return bool(name) and re.fullmatch(r"[\w.-]+/[\w.-]+", name) is not None
 
 
+def _safe_extract(zip_path, dest):
+    """Descomprime evitando rutas fuera de la carpeta de destino."""
+    import zipfile
+    dest = os.path.abspath(dest)
+    with zipfile.ZipFile(zip_path) as z:
+        for m in z.namelist():
+            target = os.path.abspath(os.path.join(dest, m))
+            if not target.startswith(dest + os.sep) and target != dest:
+                raise ValueError(f"Ruta no permitida en el zip: {m}")
+        z.extractall(dest)
+
+
+def _local_files(root):
+    return [os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/")
+            for d, _, fs in os.walk(root) for f in fs if "__MACOSX" not in d]
+
+
 class NarasimhaSLM:
     def __init__(self, base_id: str = HF_SLM_BASE, adapter_id: str = HF_SLM_ADAPTER, device: str = "cpu"):
         import torch
-        from huggingface_hub import list_repo_files
+        from huggingface_hub import hf_hub_download, list_repo_files
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.torch = torch
         self.device = device
         files = list_repo_files(adapter_id)
-        print(f"[SLM] Archivos en {adapter_id}:")
-        for f in files:
-            print("   ", f)
+        print(f"[SLM] Archivos en {adapter_id}: {files}")
+
+        # Los autores publicaron el checkpoint comprimido (slm.zip): se descarga y se descomprime.
+        root, where = adapter_id, adapter_id
+        zips = [f for f in files if f.lower().endswith(".zip")]
+        if not any(f.endswith(("adapter_config.json", "config.json")) for f in files) and zips:
+            zpath = hf_hub_download(adapter_id, zips[0])
+            root = os.path.join(os.path.expanduser("~"), ".cache", "slm_extract", adapter_id.replace("/", "__"))
+            if not os.path.isdir(root) or not os.listdir(root):
+                os.makedirs(root, exist_ok=True)
+                _safe_extract(zpath, root)
+            files = _local_files(root)
+            where = f"{adapter_id}/{zips[0]}"
+            print(f"[SLM] Contenido de {zips[0]}:")
+            for f in files:
+                print("   ", f)
+
+        def load_path(sub):
+            return os.path.join(root, sub) if os.path.isdir(root) else root, \
+                   ({} if os.path.isdir(root) or not sub else {"subfolder": sub})
 
         adapter_sub = _pick_subfolder(files, "adapter_config.json")
         if adapter_sub is not None:
             from peft import PeftConfig, PeftModel
-            kw = {"subfolder": adapter_sub} if adapter_sub else {}
-            cfg = PeftConfig.from_pretrained(adapter_id, **kw)
+            path, kw = load_path(adapter_sub)
+            cfg = PeftConfig.from_pretrained(path, **kw)
             base_name = cfg.base_model_name_or_path if _valid_hub_id(cfg.base_model_name_or_path) else base_id
+            print(f"[SLM] Modelo base: {base_name} (en adapter_config.json: {cfg.base_model_name_or_path})")
             base = AutoModelForCausalLM.from_pretrained(base_name, torch_dtype=torch.float32)
-            self.model = PeftModel.from_pretrained(base, adapter_id, **kw)
+            self.model = PeftModel.from_pretrained(base, path, **kw)
             tok_sub = _pick_subfolder(files, "tokenizer_config.json")
             if tok_sub is None:            # el adaptador no trae tokenizer: se usa el del modelo base
                 self.tok = AutoTokenizer.from_pretrained(base_name)
             else:
-                self.tok = AutoTokenizer.from_pretrained(adapter_id, **({"subfolder": tok_sub} if tok_sub else {}))
-            self.source = f"{base_name} + LoRA {adapter_id}/{adapter_sub or '(raíz)'}"
+                tpath, tkw = load_path(tok_sub)
+                self.tok = AutoTokenizer.from_pretrained(tpath, **tkw)
+            self.source = f"{base_name} + LoRA {where} ({adapter_sub or 'raíz'})"
         else:
-            # Sin adaptador: se busca un modelo completo (config.json con model_type y pesos)
             full_sub = _pick_subfolder(files, "config.json")
-            kw = {"subfolder": full_sub} if full_sub else {}
-            try:
-                self.model = AutoModelForCausalLM.from_pretrained(adapter_id, torch_dtype=torch.float32, **kw)
-                self.tok = AutoTokenizer.from_pretrained(adapter_id, **kw)
-                self.source = f"{adapter_id}/{full_sub or '(raíz)'} (modelo completo)"
-            except Exception as e:
-                raise RuntimeError(
-                    f"No se encontró un adaptador LoRA ni un modelo completo cargable en {adapter_id}. "
-                    f"Revise la lista de archivos de arriba y envíela para ajustar la carga. Detalle: {e}")
+            if full_sub is None:
+                raise RuntimeError(f"No hay adapter_config.json ni config.json en {where}. Archivos: {files}")
+            path, kw = load_path(full_sub)
+            self.model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, **kw)
+            self.tok = AutoTokenizer.from_pretrained(path, **kw)
+            self.source = f"{where} ({full_sub or 'raíz'}, modelo completo)"
         self.model.to(device).eval()
 
     @staticmethod
