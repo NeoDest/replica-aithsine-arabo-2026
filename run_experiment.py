@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--data", choices=["auto", "hf", "sim"], default="auto")
     ap.add_argument("--slm", dest="slm", action="store_true", default=True)
     ap.add_argument("--no-slm", dest="slm", action="store_false")
+    ap.add_argument("--adapter", default=None,
+                    help="adaptador LoRA: ID de Hugging Face (por defecto el publicado) o carpeta local de train_lora.py")
     ap.add_argument("--deberta", action="store_true")
     ap.add_argument("--llm", action="store_true", help="usa OpenRouter (requiere OPENROUTER_API_KEY)")
     ap.add_argument("--rules-profile", choices=["full", "paper"], default="paper",
@@ -53,7 +55,7 @@ def main():
     slm = deb = None
     if a.slm:
         from src.slm import NarasimhaSLM
-        slm = NarasimhaSLM()
+        slm = NarasimhaSLM(adapter_id=a.adapter) if a.adapter else NarasimhaSLM()
         print(f"[SLM] {slm.source}")
     if a.deberta:
         from src.slm import DebertaBaseline
@@ -117,7 +119,7 @@ def main():
     lat_ext = lat_local + (pr["llm_ms"].mean() if llm else 0)
     share_local = retained.mean()
     routing = {
-        "fuente_datos": source, "modo_externo": mode, "perfil_reglas": a.rules_profile,
+        "fuente_datos": source, "slm": slm.source if slm else "no usado", "modo_externo": mode, "perfil_reglas": a.rules_profile,
         "retenidos_local": f"{int(retained.sum())}/{len(pr)}", "enviados_externo": f"{int((~retained).sum())}/{len(pr)}",
         "filtro_por_SLM": int((slm_attack & ~pr['rules_fired'].to_numpy()).sum()) if slm else 0,
         "filtro_por_reglas": int(pr["rules_fired"].sum()),

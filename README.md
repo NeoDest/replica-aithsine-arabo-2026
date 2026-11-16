@@ -32,17 +32,17 @@ prompt → reglas (regex, Luhn, entropía) → heurística (H) → SLM local (3 
 | `src/pipeline.py` | Controlador, enrutador y cascada de niveles | 4.4, 4.8, 5.4 (pp. 8–16) | Filtro exacto (5.4); cascada **reconstruida** |
 | `src/metrics.py` | Accuracy con IC bootstrap, F1, FPR, FNR, recall por clase, hard negatives, Wilson | 5.1–5.4 (pp. 13–16) | Exacto |
 | `src/data.py` | Carga de `v1adam/Comparison_Dataset`, con respaldo simulado | 4.9 y Data Availability (pp. 12, 21) | Exacto si carga desde Hugging Face |
+| `train_lora.py` | Reentrena el LoRA con el corpus publicado y la configuración de la Tabla 3 | 4.7, 4.9, 4.10 y Tablas 3–4 (pp. 9–13) | Exacto salvo un supuesto: pérdida solo sobre la etiqueta |
 | `run_experiment.py` | Ejecuta todo sobre todos los prompts y aplica el filtro después | 5.4 y 6.6 (pp. 15, 19) | Mismo procedimiento que los autores |
 | `demo.py` | Middleware en vivo, prompt por prompt | Fig. 2 (p. 10) | — |
 
 ## Cómo ejecutarlo
 
-### Opción recomendada: Google Colab (CPU)
+### Opción recomendada: Google Colab
 
-1. Sube este repositorio a GitHub.
-2. Abre `notebooks/Replica_AitHsine_Arabo_2026.ipynb` en Colab.
-3. Cambia el entorno a **CPU** (el artículo mide la latencia sin GPU).
-4. Ejecuta las celdas en orden.
+1. Abre `notebooks/Replica_AitHsine_Arabo_2026.ipynb` en Colab.
+2. Cambia el entorno a **GPU T4**. Solo se usa para reentrenar el LoRA, como en el artículo; la inferencia y la latencia se miden en CPU.
+3. Ejecuta las celdas en orden: experimento A (adaptador publicado), reentrenamiento y experimento B (adaptador reentrenado).
 
 ### En tu PC
 
@@ -68,6 +68,13 @@ En `results/`:
 - `metricas.csv`: cada configuración junto a los valores del artículo (`paper_*`).
 - `predicciones.csv`: decisión de cada componente para cada prompt.
 - `enrutamiento.json`: prompts retenidos o enviados, sensibles que salieron y latencia por camino (equivalente a las Tablas 8 y 9).
+
+## Hallazgos de replicabilidad
+
+1. **El modelo se publicó comprimido** (`slm.zip` dentro de `v1adam/slm-threat-detection-v1`), no como adaptador estándar de Hugging Face. `src/slm.py` lo descarga y lo descomprime.
+2. **La configuración publicada no coincide con el artículo.** El `training_config.json` del zip indica 3 épocas y learning rate 2 × 10⁻⁴; la Tabla 3 (p. 11) indica 2 épocas y 5 × 10⁻⁵. El tamaño del corpus (700) y los parámetros de LoRA sí coinciden.
+3. **Con la plantilla del artículo, el adaptador publicado responde "benign" a casi todo.** El adaptador sí está cargado (sus pesos `lora_B` no son cero y cambia la salida del modelo), pero no separa las clases. Por eso se reentrena con `train_lora.py` siguiendo la Tabla 3 (experimento B).
+4. **El modelo base viene de otro formato.** El kit Rival usa Narasimha con mensajes de sistema, modo "thinking" y etiquetas `prompt_attack_message` / `benign_user_message`; el artículo lo reentrena para 3 clases con una plantilla de texto plano (p. 11).
 
 ## Resultados del artículo para comparar
 

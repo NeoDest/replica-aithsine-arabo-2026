@@ -58,12 +58,18 @@ class NarasimhaSLM:
 
         self.torch = torch
         self.device = device
-        files = list_repo_files(adapter_id)
-        print(f"[SLM] Archivos en {adapter_id}: {files}")
+        if os.path.isdir(adapter_id):           # adaptador local (p. ej., el reentrenado con train_lora.py)
+            root, where = adapter_id, adapter_id
+            files = _local_files(root)
+            zips = []
+            print(f"[SLM] Adaptador local {adapter_id}: {files}")
+        else:
+            files = list_repo_files(adapter_id)
+            print(f"[SLM] Archivos en {adapter_id}: {files}")
+            root, where = adapter_id, adapter_id
+            zips = [f for f in files if f.lower().endswith(".zip")]
 
         # Los autores publicaron el checkpoint comprimido (slm.zip): se descarga y se descomprime.
-        root, where = adapter_id, adapter_id
-        zips = [f for f in files if f.lower().endswith(".zip")]
         if not any(f.endswith(("adapter_config.json", "config.json")) for f in files) and zips:
             zpath = hf_hub_download(adapter_id, zips[0])
             root = os.path.join(os.path.expanduser("~"), ".cache", "slm_extract", adapter_id.replace("/", "__"))

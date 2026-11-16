@@ -23,6 +23,17 @@ SLM_TEMPLATE = (
     "benign, sensitive, jailbreak. Prompt: {prompt}. Classification:"
 )
 
+# --- Ajuste LoRA según la Tabla 3 (p. 11) y la Tabla 4 (p. 12) ---
+LORA = {"r": 16, "lora_alpha": 32, "lora_dropout": 0.05, "bias": "none",
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]}
+TRAIN = {"learning_rate": 5e-5, "num_train_epochs": 2, "per_device_train_batch_size": 1,
+         "gradient_accumulation_steps": 8, "lr_scheduler_type": "linear", "warmup_steps": 0,
+         "weight_decay": 0.0, "max_grad_norm": 1.0, "seed": 42}
+# Particiones (Tabla 4): entrenamiento 200/200/300, validación 50/50/50, prueba 50/50/50
+SPLIT = {"train": {"benign": 200, "sensitive": 200, "jailbreak": 300},
+         "validation": {"benign": 50, "sensitive": 50, "jailbreak": 50},
+         "test": {"benign": 50, "sensitive": 50, "jailbreak": 50}}
+
 # --- Agregación del veredicto (sección 4.8, p. 12) ---
 W_HEURISTIC = 0.40          # C = 0.40 H + 0.60 L
 W_LLM = 0.60
