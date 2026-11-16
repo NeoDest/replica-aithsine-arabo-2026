@@ -2,34 +2,76 @@
 
 - Modelo base: Narasimha-0.6B (sarthakrastogi/narasimha-b-0.6b), decoder de la familia Qwen3.
 - Adaptador LoRA publicado por los autores: v1adam/slm-threat-detection-v1.
+  La Tabla 3 (p. 11) dice que sus valores salen del config.json y el adapter_config.json
+  del checkpoint publicado. En el repositorio, esos archivos pueden estar en una subcarpeta
+  (p. ej., checkpoint-175: 175 pasos de optimización); por eso se buscan automáticamente.
 - Clasificación generativa con la plantilla de la p. 11; el primer token generado
   tras "Classification:" se interpreta como la etiqueta.
 - Inferencia solo en CPU (sección 4.10, p. 13).
 """
+import os
+import re
 import time
 
 from .config import CLASSES, HF_SLM_ADAPTER, HF_SLM_BASE, SLM_TEMPLATE
 
 
+def _pick_subfolder(files, filename):
+    """Devuelve la subcarpeta que contiene `filename`. Si hay varios checkpoints, el último
+    (el artículo publica el de la última época, p. 11)."""
+    hits = [f for f in files if f == filename or f.endswith("/" + filename)]
+    if not hits:
+        return None
+    def step(path):
+        m = re.search(r"checkpoint-(\d+)", path)
+        return int(m.group(1)) if m else 10 ** 9      # carpeta sin número = versión final
+    best = max(hits, key=lambda p: (step(p), -p.count("/")))
+    return os.path.dirname(best)                      # "" si está en la raíz
+
+
+def _valid_hub_id(name):
+    return bool(name) and re.fullmatch(r"[\w.-]+/[\w.-]+", name) is not None
+
+
 class NarasimhaSLM:
     def __init__(self, base_id: str = HF_SLM_BASE, adapter_id: str = HF_SLM_ADAPTER, device: str = "cpu"):
         import torch
+        from huggingface_hub import list_repo_files
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.torch = torch
         self.device = device
-        try:
+        files = list_repo_files(adapter_id)
+        print(f"[SLM] Archivos en {adapter_id}:")
+        for f in files:
+            print("   ", f)
+
+        adapter_sub = _pick_subfolder(files, "adapter_config.json")
+        if adapter_sub is not None:
             from peft import PeftConfig, PeftModel
-            cfg = PeftConfig.from_pretrained(adapter_id)
-            base = AutoModelForCausalLM.from_pretrained(cfg.base_model_name_or_path or base_id, torch_dtype=torch.float32)
-            self.model = PeftModel.from_pretrained(base, adapter_id)
-            self.tok = AutoTokenizer.from_pretrained(cfg.base_model_name_or_path or base_id)
-            self.source = f"{cfg.base_model_name_or_path or base_id} + LoRA {adapter_id}"
-        except Exception as e:  # si el repositorio contiene el modelo completo y no un adaptador
-            print(f"[SLM] No se pudo cargar como adaptador LoRA ({e}). Se intenta como modelo completo.")
-            self.model = AutoModelForCausalLM.from_pretrained(adapter_id, torch_dtype=torch.float32)
-            self.tok = AutoTokenizer.from_pretrained(adapter_id)
-            self.source = adapter_id
+            kw = {"subfolder": adapter_sub} if adapter_sub else {}
+            cfg = PeftConfig.from_pretrained(adapter_id, **kw)
+            base_name = cfg.base_model_name_or_path if _valid_hub_id(cfg.base_model_name_or_path) else base_id
+            base = AutoModelForCausalLM.from_pretrained(base_name, torch_dtype=torch.float32)
+            self.model = PeftModel.from_pretrained(base, adapter_id, **kw)
+            tok_sub = _pick_subfolder(files, "tokenizer_config.json")
+            if tok_sub is None:            # el adaptador no trae tokenizer: se usa el del modelo base
+                self.tok = AutoTokenizer.from_pretrained(base_name)
+            else:
+                self.tok = AutoTokenizer.from_pretrained(adapter_id, **({"subfolder": tok_sub} if tok_sub else {}))
+            self.source = f"{base_name} + LoRA {adapter_id}/{adapter_sub or '(raíz)'}"
+        else:
+            # Sin adaptador: se busca un modelo completo (config.json con model_type y pesos)
+            full_sub = _pick_subfolder(files, "config.json")
+            kw = {"subfolder": full_sub} if full_sub else {}
+            try:
+                self.model = AutoModelForCausalLM.from_pretrained(adapter_id, torch_dtype=torch.float32, **kw)
+                self.tok = AutoTokenizer.from_pretrained(adapter_id, **kw)
+                self.source = f"{adapter_id}/{full_sub or '(raíz)'} (modelo completo)"
+            except Exception as e:
+                raise RuntimeError(
+                    f"No se encontró un adaptador LoRA ni un modelo completo cargable en {adapter_id}. "
+                    f"Revise la lista de archivos de arriba y envíela para ajustar la carga. Detalle: {e}")
         self.model.to(device).eval()
 
     @staticmethod
