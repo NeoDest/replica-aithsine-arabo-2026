@@ -48,7 +48,7 @@ def main():
     df, source = load_eval(a.data)
     if a.limit:
         df = df.groupby("label", group_keys=False).head(a.limit)
-    out = Path(a.out); out.mkdir(exist_ok=True)
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     y_true = (df["label"] != "benign").to_numpy()
 
     rules, heur = RuleEngine(profile=a.rules_profile), HeuristicEngine()
