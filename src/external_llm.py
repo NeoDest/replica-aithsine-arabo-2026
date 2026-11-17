@@ -19,6 +19,7 @@ SYSTEM_PROMPT: texto de la Fig. A1 (p. 22), reproducido tal como lo publican los
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 from .config import EXTERNAL_MAX_TOKENS, EXTERNAL_MODEL, EXTERNAL_TEMPERATURE
@@ -93,7 +94,6 @@ class ExternalLLM:
                              {"role": "user", "content": f"Prompt under analysis:\n{text}\n\nHeuristic indicators: {indicators}"}]}
         req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",
                                      headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
-        import urllib.error
         for intento in range(4):
             t0 = time.perf_counter()
             try:
