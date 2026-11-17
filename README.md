@@ -28,7 +28,7 @@ prompt → reglas (regex, Luhn, entropía) → heurística (H) → SLM local (3 
 | `src/rules.py` | Regex de PII y credenciales, Luhn, entropía, firmas de jailbreak | 4.4 (p. 8), 6.3 (p. 18) | **Reconstruido**: el artículo no publica las expresiones |
 | `src/heuristics.py` | Indicadores de manipulación y puntaje H | 4.4 (p. 8) | **Reconstruido**: no publica los pesos |
 | `src/slm.py` | Narasimha-0.6B + adaptador LoRA, clasificación generativa en CPU; línea base DeBERTa-v3 | 4.7 (pp. 9–11), 4.10 (p. 13), Tabla 5 | Exacto (modelos publicados); ID de DeBERTa asumido |
-| `src/external_llm.py` | Gemini 3 Flash vía OpenRouter, temp. 0.3, 200 tokens, JSON | 4.4 (p. 8), Apéndice A (p. 22) | System prompt **parcial**: pegar el texto exacto de la Fig. A1 |
+| `src/external_llm.py` | Gemini 3 Flash vía OpenRouter (o Google AI Studio), temp. 0.3, 200 tokens, JSON | 4.4 (p. 8), Apéndice A (p. 22) | System prompt exacto (Fig. A1); regla binaria a partir del JSON **reconstruida** |
 | `src/pipeline.py` | Controlador, enrutador y cascada de niveles | 4.4, 4.8, 5.4 (pp. 8–16) | Filtro exacto (5.4); cascada **reconstruida** |
 | `src/metrics.py` | Accuracy con IC bootstrap, F1, FPR, FNR, recall por clase, hard negatives, Wilson | 5.1–5.4 (pp. 13–16) | Exacto |
 | `src/data.py` | Carga de `v1adam/Comparison_Dataset`, con respaldo simulado | 4.9 y Data Availability (pp. 12, 21) | Exacto si carga desde Hugging Face |
@@ -94,7 +94,7 @@ Además: 70 de 120 prompts retenidos en local y 38 de 40 sensibles retenidos (Ta
 2. **Sin LLM externo, el híbrido corre en "modo local".** A los prompts enviados fuera se les aplica la heurística (H ≥ 0.5) en lugar de Gemini, y así se indica en `enrutamiento.json`. Para una réplica completa del híbrido hace falta `--llm`.
 3. **El dataset simulado es solo de respaldo.** Lo escribimos nosotros con la misma estructura del artículo. Como las reglas y los datos se redactaron juntos, el desempeño de las reglas sobre él es optimista. Los resultados válidos para comparar son los que usan `v1adam/Comparison_Dataset`.
 4. **Nombres de columna del dataset.** El artículo no los documenta. `src/data.py` los detecta; si falla, ajústalos ahí.
-5. **System prompt del LLM externo.** Copia el texto exacto de la Fig. A1 (p. 22) en `src/external_llm.py`.
+5. **LLM externo.** El system prompt es el exacto de la Fig. A1 (p. 22). Requiere `OPENROUTER_API_KEY` (de pago, como el artículo) o `GEMINI_API_KEY` (Google AI Studio, nivel gratuito: mismo modelo por otra vía, reportar como desviación). Un prompt se marca como amenaza si algún campo booleano es verdadero o si `threat_severity` no es "none" (reconstrucción). Si las respuestas llegan cortadas por el límite de 200 tokens, `enrutamiento.json` lo muestra en `llm_respuestas_validas`.
 6. **Línea base DeBERTa-v3.** El artículo no da el ID exacto del modelo. Se asume `protectai/deberta-v3-base-prompt-injection-v2`.
 7. **Llama Guard 4 no se replica.** Es un servicio remoto de 12 mil millones de parámetros.
 8. **Una sola medición de latencia**, igual que en el artículo (p. 20). Depende del CPU de Colab o de tu PC.

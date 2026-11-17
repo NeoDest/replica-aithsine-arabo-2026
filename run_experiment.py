@@ -7,7 +7,8 @@ para obtener el resultado de la arquitectura con enrutamiento (sección 5.4, p. 
 Uso:
   python run_experiment.py --data auto --slm --deberta          # réplica en CPU
   python run_experiment.py --data sim --no-slm                  # prueba rápida sin modelos
-  OPENROUTER_API_KEY=... python run_experiment.py --llm         # incluye la capa externa (opcional, de pago)
+  OPENROUTER_API_KEY=... python run_experiment.py --llm         # capa externa vía OpenRouter (de pago, como el artículo)
+  GEMINI_API_KEY=...     python run_experiment.py --llm         # alternativa: Google AI Studio (nivel gratuito)
 """
 import argparse
 import json
@@ -38,7 +39,8 @@ def main():
     ap.add_argument("--adapter", default=None,
                     help="adaptador LoRA: ID de Hugging Face (por defecto el publicado) o carpeta local de train_lora.py")
     ap.add_argument("--deberta", action="store_true")
-    ap.add_argument("--llm", action="store_true", help="usa OpenRouter (requiere OPENROUTER_API_KEY)")
+    ap.add_argument("--llm", action="store_true", help="activa el LLM externo (OPENROUTER_API_KEY o GEMINI_API_KEY)")
+    ap.add_argument("--llm-max-tokens", type=int, default=200, help="200 en el artículo (p. 8); súbalo solo si las respuestas llegan cortadas y repórtelo")
     ap.add_argument("--rules-profile", choices=["full", "paper"], default="paper",
                     help="'paper' excluye los formatos que el motor de los autores no detectó (p. 18)")
     ap.add_argument("--limit", type=int, default=None)
@@ -60,9 +62,9 @@ def main():
     if a.deberta:
         from src.slm import DebertaBaseline
         deb = DebertaBaseline(HF_DEBERTA_BASELINE)
-    llm = ExternalLLM() if a.llm else None
+    llm = ExternalLLM(max_tokens=a.llm_max_tokens) if a.llm else None
     if llm is not None and not llm.enabled:
-        print("[LLM] Sin OPENROUTER_API_KEY: la capa externa queda desactivada (modo local)."); llm = None
+        print("[LLM] Sin OPENROUTER_API_KEY ni GEMINI_API_KEY: la capa externa queda desactivada (modo local)."); llm = None
 
     rec = []
     for i, text in enumerate(df["prompt"]):
@@ -77,7 +79,7 @@ def main():
         if llm:
             g = llm.analyze(text, h.indicators)
             row.update(llm_ok=g.get("ok", False), llm_flag=g.get("flagged", False),
-                       llm_conf=g.get("confidence"), llm_ms=g.get("latency_ms"))
+                       llm_conf=g.get("confidence"), llm_sev=g.get("severity"), llm_err=g.get("reason"), llm_ms=g.get("latency_ms"))
         rec.append(row)
         if (i + 1) % 20 == 0:
             print(f"  {i + 1}/{len(df)} prompts procesados")
@@ -96,7 +98,7 @@ def main():
     slm_attack = pr["slm_label"].isin(["sensitive", "jailbreak"]).to_numpy() if slm else np.zeros(len(pr), bool)
     retained = pr["rules_fired"].to_numpy() | slm_attack
     if llm:
-        ext_flag, mode = pr["llm_flag"].to_numpy(bool), "LLM externo"
+        ext_flag, mode = pr["llm_flag"].to_numpy(bool), f"LLM externo ({llm.provider}, {llm.model}, max_tokens={llm.max_tokens})"
     else:
         ext_flag, mode = (pr["H"] >= 0.5).to_numpy(), "modo local (heurística H >= 0.5 en lugar del LLM externo)"
     routed = retained | (~retained & ext_flag)
@@ -123,6 +125,7 @@ def main():
         "retenidos_local": f"{int(retained.sum())}/{len(pr)}", "enviados_externo": f"{int((~retained).sum())}/{len(pr)}",
         "filtro_por_SLM": int((slm_attack & ~pr['rules_fired'].to_numpy()).sum()) if slm else 0,
         "filtro_por_reglas": int(pr["rules_fired"].sum()),
+        "llm_respuestas_validas": f"{int(pr['llm_ok'].sum())}/{len(pr)}" if llm else "no usado",
         "sensibles_retenidos": f"{k_sens}/{n_sens}", "sensibles_retenidos_IC95_wilson": [round(x, 3) for x in wilson_ci(k_sens, n_sens)],
         "sensibles_enviados_fuera": [p for p, s, r_ in zip(pr["prompt"], sens, retained) if s and not r_],
         "latencia_camino_local_ms": round(lat_local, 1), "latencia_camino_externo_ms": round(lat_ext, 1),
