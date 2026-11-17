@@ -101,9 +101,15 @@ class ExternalLLM:
                     content = json.load(r)["choices"][0]["message"]["content"] or ""
                 out = parse_response(content)
             except urllib.error.HTTPError as e:
-                if e.code in (429, 503) and intento < 3:   # límite de uso: espera y reintenta
+                try:
+                    detalle = e.read().decode("utf-8", "replace")[:300]
+                except Exception:
+                    detalle = ""
+                diario = e.code == 429 and "PerDay" in detalle
+                if e.code in (429, 503) and intento < 3 and not diario:   # límite por minuto: espera y reintenta
+                    print(f"    [LLM] HTTP {e.code}: límite de uso, reintento en {20 * (intento + 1)} s")
                     time.sleep(20 * (intento + 1)); continue
-                out = {"ok": False, "reason": f"HTTP {e.code}"}
+                out = {"ok": False, "reason": f"HTTP {e.code} {detalle}", "quota": e.code == 429}
             except Exception as e:   # respuesta no interpretable o cortada -> resultado nulo (p. 8)
                 out = {"ok": False, "reason": str(e)[:200]}
             out["latency_ms"] = (time.perf_counter() - t0) * 1000   # sin contar las esperas
